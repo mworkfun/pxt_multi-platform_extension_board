@@ -31,18 +31,24 @@ const enum Humiture {
     Humidity = 1
 }
 
+const enum Sensor {
+    IR_receiver = 0x00,
+    Microphone = 0x02,
+    Potentiometer = 0x04
+}
+
 const enum Veer {
     CW = 0,
     CCW = 1
 }
 
 //% color="#ff6800" icon="\uf002" weight=15
-//% groups="['Display-Buttom', 'Led', 'RGB-Led', 'Humiture', 'Ultrasonic', 'Fan', 'Buzzer', 'Button', 'Storer']"
+//% groups="['Display-Buttom', 'Led', 'RGB-Led', 'Humiture', 'Ultrasonic', 'I2c-read', 'Fan', 'Buzzer', 'Button', 'Storer']"
 namespace Multi_platform {
     // Compute a Dallas Semiconductor 8 bit CRC directly.
     // this is much slower, but a little smaller, than the lookup table.
     // https://www.analog.com/en/technical-articles/understanding-and-using-cyclic-redundancy-checks-with-maxim-1wire-and-ibutton-products.html
-    function crc8(addr: any, len: number) {
+    function crc8(addr: any[], len: number) {
         let i: number = 0;
         let a: number = 0;
         let crc: number = 0;
@@ -65,7 +71,7 @@ namespace Multi_platform {
         return crc;
     }
 
-    function crc16(input: any, len: number) {
+    function crc16(input: any[], len: number) {
         let i: number = 0;
         let a: number = 0;
         let crc: number = 0x0000;
@@ -324,17 +330,17 @@ namespace Multi_platform {
     ////////////////////////////////////////////
     // LED
     //% block="Set $Pos led  $OnOff"
-    //% Pos.min=0 Pos.max=7 OnOff.min=0 OnOff.max=1
+    //% Pos.min=1 Pos.max=8 OnOff.min=0 OnOff.max=1
     //% group="Led" weight=1
     export function Set_Led(Pos: number, OnOff: number){
         if (Pos > 8 || OnOff > 1) {
             return;
         }
         if (OnOff == 1) {
-            ledData = ledData | (1 << Pos);
+            ledData = ledData | (1 << (Pos-1));
         }
         else {
-            ledData = ledData & (~(1 << Pos));
+            ledData = ledData & (~(1 << (Pos-1)));
         }
         //ground latchPin and hold low for as long as you are transmitting
         pins.digitalWritePin(9, 0);
@@ -472,7 +478,7 @@ namespace Multi_platform {
     //% block="Ultrasonic(cm)"
     //% group="Ultrasonic" weight=1
     ////////////////////////////////////////////
-    export function Ultrasonic_(TH: Humiture) {
+    export function Ultrasonic_() {
         let t: number = 0;
 
         pins.digitalWritePin(0, 1);
@@ -481,6 +487,21 @@ namespace Multi_platform {
 
         t = pins.pulseIn(DigitalPin.P1, PulseValue.High);
         return t/29/2;
+    }
+
+
+
+    ////////////////////////////////////////////
+    //% block="I2c-read $sensor"
+    //% group="I2c_read" weight=1
+    ////////////////////////////////////////////
+    export function I2c_read(sensor: Sensor) {
+        let address: number = 0x2d;
+        let result: number = 0;
+        pins.i2cWriteNumber(address, sensor, NumberFormat.Int8LE, true);
+        result = pins.i2cReadNumber(address, NumberFormat.Int8LE, true);
+        result = result*256 + pins.i2cReadNumber(address, NumberFormat.Int8LE, false);
+        return result;
     }
 
 
@@ -586,7 +607,6 @@ namespace Multi_platform {
 
 
     let ROM_NUM = [0,0,0,0,0,0,0,0];
-
     ////////////////////////////////////////////
     //% block="Search_device"
     //% group="Storer" weight=6
@@ -636,7 +656,7 @@ namespace Multi_platform {
         return true;
     }
 
-    function EEPROM_check_crc16(input: any, len: number, inverted_crc: any) {
+    function EEPROM_check_crc16(input: any[], len: number, inverted_crc: any[]) {
         let crc: number = ~crc16(input, len);
         return (crc & 0xFF) == inverted_crc[0] && (crc >> 8) == inverted_crc[1];
     }
@@ -672,14 +692,14 @@ namespace Multi_platform {
 
     // Write a 8-byte row, must write 8 bytes at a time.
     //% block="Write $buf to $address"
-    //% address.min=0 address.max=16
+    //% address.min=0 address.max=15
     //% group="Storer" weight=3
-    export function EEPROM_write(address: number, buf: any){
+    export function EEPROM_write(buf: any[], address: number){
         let verify: boolean = false;
         let crc16 = [0,0];    // store value of crc
         let buffer = [0,0,0,0,0,0,0,0,0,0,0,0];       // data)+command = 12bytes
         let i: number = 0;
-
+        
         // 1.write scratchpad --> Write data to the scratchpad
         buffer[0] = 0x0F;                   // store commands --> write scratchpad
         buffer[1] = address & 0x00ff;       // address
@@ -687,7 +707,7 @@ namespace Multi_platform {
         for(i=0; i<8; i++){
             buffer[i + 3] = buf[i];         // 8 bytes data
         }   
-
+        
         EEPROM_slect_rom();                        // Match ROM
         OneWire_write_byte(buffer[0]);          // CMD ---> write scratchpad
         OneWire_write_byte(buffer[1]);          // address
